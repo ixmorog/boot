@@ -28,11 +28,6 @@ main() {
         command -v "$command" >/dev/null || { echo "Required command: $command" >&2; return 1; }
     done
 
-    # Only change a Linux console font inside the verified live environment.
-    case "$(tty)" in
-        /dev/tty[0-9]*|/dev/console) setfont cyr-sun16 ;;
-    esac
-
     local gh_version=2.102.0
     local gh_sha256=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
     local repository=ixmorog/homelab
@@ -48,28 +43,28 @@ main() {
     export GH_CONFIG_DIR="$download_dir/auth" GH_HOST=github.com GH_NO_UPDATE_NOTIFIER=1
     mkdir -m 700 "$GH_CONFIG_DIR"
 
-    echo 'Скачиваю GitHub CLI...'
+    echo 'Downloading GitHub CLI...'
     curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
         --retry 2 --connect-timeout 15 --max-time 180 \
         --output "$download_dir/gh.tar.gz" \
         "https://github.com/cli/cli/releases/download/v$gh_version/gh_${gh_version}_linux_amd64.tar.gz"
     printf '%s  %s\n' "$gh_sha256" "$download_dir/gh.tar.gz" | sha256sum --check --status || {
-        echo 'Контрольная сумма GitHub CLI не совпала. Запуск отменён.' >&2
+        echo 'GitHub CLI checksum mismatch. Stopping before execution.' >&2
         return 1
     }
     tar -xzf "$download_dir/gh.tar.gz" -C "$download_dir" --no-same-owner \
         "gh_${gh_version}_linux_amd64/bin/gh"
     gh_binary="$download_dir/gh_${gh_version}_linux_amd64/bin/gh"
 
-    echo 'Открой https://github.com/login/device на телефоне или другом компьютере.'
-    echo 'Введи показанный ниже код и подтверди вход в GitHub CLI.'
+    echo 'Open https://github.com/login/device on your phone or another computer.'
+    echo 'Enter the code shown below and authorize GitHub CLI.'
     # No Git credential helper or browser is needed in the live ISO.
     GH_PROMPT_DISABLED=1 timeout --foreground --kill-after=5 600 "$gh_binary" auth login \
         --hostname github.com --web --git-protocol https --insecure-storage --clipboard=false
 
     commit=$(timeout --kill-after=5 60 "$gh_binary" api "repos/$repository/commits/main" --jq .sha)
-    [[ $commit =~ ^[0-9a-f]{40}$ ]] || { echo 'GitHub вернул некорректный commit ID.' >&2; return 1; }
-    echo "Скачиваю установщик $repository, commit $commit..."
+    [[ $commit =~ ^[0-9a-f]{40}$ ]] || { echo 'GitHub returned an invalid commit ID.' >&2; return 1; }
+    echo "Downloading the installer from $repository at commit $commit..."
     timeout --kill-after=5 180 "$gh_binary" api "repos/$repository/tarball/$commit" > "$download_dir/source.tar.gz"
 
     # Only the source checkout remains for diagnostics and retrying later stages.
@@ -77,14 +72,14 @@ main() {
     source_dir=$(mktemp -d /run/homelab.XXXXXX)
     tar -xzf "$download_dir/source.tar.gz" -C "$source_dir" --strip-components=1 --no-same-owner
     [[ -f "$source_dir/workstation/bootstrap" && -f "$source_dir/workstation/install" ]] || {
-        echo "В скачанном репозитории нет установщика: $source_dir" >&2
+        echo "The downloaded repository does not contain the installer: $source_dir" >&2
         return 1
     }
 
     rm -rf -- "$download_dir"
     trap - EXIT INT TERM
     unset GH_CONFIG_DIR GH_HOST GH_NO_UPDATE_NOTIFIER
-    echo "Установщик сохранён в $source_dir"
+    echo "Installer source saved to $source_dir"
     cd -- "$source_dir"
     exec bash workstation/bootstrap
 }

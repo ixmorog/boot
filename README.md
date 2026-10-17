@@ -1,17 +1,17 @@
 # Arch workstation boot
 
-Запуск из свежего официального Arch ISO: UEFI, x86_64, root, интернет.
+Run from a freshly booted official Arch ISO: UEFI, x86_64, root, internet access.
 
 ```sh
 curl -fsSLo /run/boot https://ixmorog.github.io/boot/run && bash /run/boot
 ```
 
-Открыть `github.com/login/device` на телефоне или другом компьютере, ввести код и подтвердить GitHub CLI. Затем откроется мастер установки.
+Open `github.com/login/device` on your phone or another computer, enter the code and authorize GitHub CLI. The installer wizard will then start.
 
-- Здесь только загрузчик. Настройки и основной установщик находятся в приватном `ixmorog/homelab`.
-- GitHub CLI скачивается с закреплённой версией и SHA256. Репозиторий скачивается по конкретному commit ID из `main`.
-- Локальная авторизация хранится в RAM и удаляется до запуска мастера. OAuth-доступ приложения на GitHub этим не отзывается.
-- Исходники остаются в `/run/homelab.*` до перезагрузки, чтобы можно было повторить отдельный этап.
-- Форматирование выполняет основной установщик после выбора диска и подтверждения.
+- This repository contains only the launcher. Workstation settings and the installer stay in the private `ixmorog/homelab` repository.
+- GitHub CLI uses a pinned version and SHA256. The installer is downloaded at an exact commit from `main`.
+- Local login credentials stay in RAM and are removed before the wizard starts. This does not revoke the app's OAuth access on GitHub.
+- Source files remain in `/run/homelab.*` until reboot, allowing individual stages to be retried.
+- The installer formats a disk only after you select it and confirm.
 
-Публикация: GitHub Pages, ветка `main`, каталог `/`. Без сборщика и дополнительных зависимостей.
+Published with GitHub Pages from the root of `main`. No build tools or extra dependencies.
