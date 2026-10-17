@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arch workstation boot</title>
+<style>
+  :root { color-scheme: dark light; font: 17px/1.6 system-ui, sans-serif; }
+  body { max-width: 48rem; margin: 12vh auto; padding: 0 1.5rem; }
+  h1 { line-height: 1.2; letter-spacing: -.04em; }
+  pre { padding: 1.2rem; border: 1px solid #8886; border-radius: .6rem; overflow-x: auto; }
+  code { font-size: .9em; }
+  a { color: #568feb; }
+</style>
+<h1>Arch workstation boot</h1>
+<p>Официальный Arch ISO, UEFI, x86_64. Подключись к интернету и выполни от root:</p>
+<pre><code>curl -fsSLo /run/boot https://ixmorog.github.io/boot/run &amp;&amp; bash /run/boot</code></pre>
+<p>Введи показанный код на <a href="https://github.com/login/device">github.com/login/device</a> в браузере телефона или другого компьютера. После входа откроется мастер установки.</p>
+<p>Этот публичный загрузчик не содержит настроек workstation или секретов. Основной установщик скачивается из приватного репозитория. Выбор диска и подтверждение остаются в мастере.</p>
+<p><a href="https://github.com/ixmorog/boot">Исходный код</a> · <a href="run">Загрузочный скрипт</a></p>
+</html>

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Download the private installer from a fresh official Arch Linux ISO.
+set -euo pipefail
+
+require_live() {
+    if [[ $EUID != 0 || ! -d /run/archiso || ! -d /sys/firmware/efi || $(uname -m) != x86_64 ]]; then
+        echo 'Run from the official x86_64 Arch ISO, booted in UEFI, as root.' >&2
+        return 1
+    fi
+    if [[ $(findmnt -n -o FSTYPE --target /run) != tmpfs ]]; then
+        echo '/run must be tmpfs: login credentials must stay in RAM.' >&2
+        return 1
+    fi
+}
+
+require_terminal() {
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        echo 'Download this script to a file, then run it with bash from a terminal.' >&2
+        return 1
+    fi
+}
+
+main() {
+    require_live
+    require_terminal
+    local command
+    for command in curl tar sha256sum mktemp timeout; do
+        command -v "$command" >/dev/null || { echo "Required command: $command" >&2; return 1; }
+    done
+
+    # Only change a Linux console font inside the verified live environment.
+    case "$(tty)" in
+        /dev/tty[0-9]*|/dev/console) setfont cyr-sun16 ;;
+    esac
+
+    local gh_version=2.102.0
+    local gh_sha256=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+    local repository=ixmorog/homelab
+    local gh_binary commit source_dir
+
+    umask 077
+    # Global only so the EXIT trap also works after main returns on an error.
+    download_dir=$(mktemp -d /run/workstation-fetch.XXXXXX)
+    trap 'rm -rf -- "$download_dir"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_DEBUG
+    export GH_CONFIG_DIR="$download_dir/auth" GH_HOST=github.com GH_NO_UPDATE_NOTIFIER=1
+    mkdir -m 700 "$GH_CONFIG_DIR"
+
+    echo 'Скачиваю GitHub CLI...'
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+        --retry 2 --connect-timeout 15 --max-time 180 \
+        --output "$download_dir/gh.tar.gz" \
+        "https://github.com/cli/cli/releases/download/v$gh_version/gh_${gh_version}_linux_amd64.tar.gz"
+    printf '%s  %s\n' "$gh_sha256" "$download_dir/gh.tar.gz" | sha256sum --check --status || {
+        echo 'Контрольная сумма GitHub CLI не совпала. Запуск отменён.' >&2
+        return 1
+    }
+    tar -xzf "$download_dir/gh.tar.gz" -C "$download_dir" --no-same-owner \
+        "gh_${gh_version}_linux_amd64/bin/gh"
+    gh_binary="$download_dir/gh_${gh_version}_linux_amd64/bin/gh"
+
+    echo 'Открой https://github.com/login/device на телефоне или другом компьютере.'
+    echo 'Введи показанный ниже код и подтверди вход в GitHub CLI.'
+    # No Git credential helper or browser is needed in the live ISO.
+    GH_PROMPT_DISABLED=1 timeout --foreground --kill-after=5 600 "$gh_binary" auth login \
+        --hostname github.com --web --git-protocol https --insecure-storage --clipboard=false
+
+    commit=$(timeout --kill-after=5 60 "$gh_binary" api "repos/$repository/commits/main" --jq .sha)
+    [[ $commit =~ ^[0-9a-f]{40}$ ]] || { echo 'GitHub вернул некорректный commit ID.' >&2; return 1; }
+    echo "Скачиваю установщик $repository, commit $commit..."
+    timeout --kill-after=5 180 "$gh_binary" api "repos/$repository/tarball/$commit" > "$download_dir/source.tar.gz"
+
+    # Only the source checkout remains for diagnostics and retrying later stages.
+    umask 022
+    source_dir=$(mktemp -d /run/homelab.XXXXXX)
+    tar -xzf "$download_dir/source.tar.gz" -C "$source_dir" --strip-components=1 --no-same-owner
+    [[ -f "$source_dir/workstation/bootstrap" && -f "$source_dir/workstation/install" ]] || {
+        echo "В скачанном репозитории нет установщика: $source_dir" >&2
+        return 1
+    }
+
+    rm -rf -- "$download_dir"
+    trap - EXIT INT TERM
+    unset GH_CONFIG_DIR GH_HOST GH_NO_UPDATE_NOTIFIER
+    echo "Установщик сохранён в $source_dir"
+    cd -- "$source_dir"
+    exec bash workstation/bootstrap
+}
+
+if [[ ${BASH_SOURCE[0]:-} == "$0" || -z ${BASH_SOURCE[0]:-} ]]; then
+    main "$@"
+fi
