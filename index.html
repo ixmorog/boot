@@ -14,7 +14,8 @@
 <h1>Arch workstation boot</h1>
 <p>Boot the official x86_64 Arch ISO in UEFI mode, connect to the internet and run as root:</p>
 <pre><code>curl -fsSLo /run/boot https://ixmorog.github.io/boot/run &amp;&amp; bash /run/boot</code></pre>
-<p>Enter the displayed code at <a href="https://github.com/login/device">github.com/login/device</a> using your phone or another computer. The installer wizard starts after you sign in.</p>
+<p>On the first run, enter the displayed code at <a href="https://github.com/login/device">github.com/login/device</a> using your phone or another computer. Run the same command again to retry with the latest installer, without signing in again.</p>
+<p>Your login stays in RAM for the current live session. Reboot or run <code>bash /run/boot --logout</code> to clear it.</p>
 <p>This public launcher contains no workstation settings or secrets. It downloads the installer from a private repository. You choose the disk and confirm in the wizard.</p>
 <p><a href="https://github.com/ixmorog/boot">Source code</a> · <a href="run">Launch script</a></p>
 </html>

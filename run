@@ -20,8 +20,43 @@ require_terminal() {
     fi
 }
 
+session_path() {
+    printf '%s\n' /run/workstation-boot
+}
+
+check_private_directory() {
+    if [[ -L "$1" || ! -d "$1" || $(stat -c '%u:%a' -- "$1") != "$EUID:700" ]]; then
+        echo "Expected a private directory owned by the current user: $1" >&2
+        return 1
+    fi
+}
+
+cleanup_download() {
+    local status=$1
+    [[ -z ${download_dir:-} ]] || rm -rf -- "$download_dir"
+    [[ -z ${pending_auth_dir:-} ]] || rm -rf -- "$pending_auth_dir"
+    return "$status"
+}
+
 main() {
+    if (( $# > 1 )) || [[ ${1:-} != '' && ${1:-} != --logout ]]; then
+        echo 'Usage: bash /run/boot [--logout]' >&2
+        return 2
+    fi
     require_live
+    local session_dir
+    session_dir=$(session_path)
+    if [[ -e "$session_dir" || -L "$session_dir" ]]; then
+        check_private_directory "$session_dir"
+        if [[ -e "$session_dir/auth" || -L "$session_dir/auth" ]]; then
+            check_private_directory "$session_dir/auth"
+        fi
+    fi
+    if [[ ${1:-} == --logout ]]; then
+        rm -rf -- "$session_dir/auth"
+        echo 'Local GitHub login cleared. Run the launcher again to sign in.'
+        return 0
+    fi
     require_terminal
     local command
     for command in curl tar sha256sum mktemp timeout; do
@@ -34,14 +69,16 @@ main() {
     local gh_binary commit source_dir
 
     umask 077
-    # Global only so the EXIT trap also works after main returns on an error.
+    [[ -d "$session_dir" ]] || mkdir -m 700 -- "$session_dir"
+    check_private_directory "$session_dir"
+    # These globals let the EXIT trap clean failed downloads and partial logins.
+    pending_auth_dir=''
     download_dir=$(mktemp -d /run/workstation-fetch.XXXXXX)
-    trap 'rm -rf -- "$download_dir"' EXIT
+    trap 'cleanup_download "$?"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_DEBUG
-    export GH_CONFIG_DIR="$download_dir/auth" GH_HOST=github.com GH_NO_UPDATE_NOTIFIER=1
-    mkdir -m 700 "$GH_CONFIG_DIR"
+    export GH_CONFIG_DIR="$session_dir/auth" GH_HOST=github.com GH_NO_UPDATE_NOTIFIER=1
 
     echo 'Downloading GitHub CLI...'
     curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
@@ -56,18 +93,35 @@ main() {
         "gh_${gh_version}_linux_amd64/bin/gh"
     gh_binary="$download_dir/gh_${gh_version}_linux_amd64/bin/gh"
 
-    echo 'Open https://github.com/login/device on your phone or another computer.'
-    echo 'Enter the code shown below and authorize GitHub CLI.'
-    # No Git credential helper or browser is needed in the live ISO.
-    GH_PROMPT_DISABLED=1 timeout --foreground --kill-after=5 600 "$gh_binary" auth login \
-        --hostname github.com --web --git-protocol https --insecure-storage --clipboard=false
+    # Read only local credentials. A network failure must not force a new login.
+    if "$gh_binary" auth token --hostname github.com >/dev/null 2>&1; then
+        echo 'Using the GitHub login saved for this live session.'
+    else
+        rm -rf -- "$GH_CONFIG_DIR"
+        mkdir -m 700 -- "$GH_CONFIG_DIR"
+        pending_auth_dir=$GH_CONFIG_DIR
+        echo 'Open https://github.com/login/device on your phone or another computer.'
+        echo 'Enter the code shown below and authorize GitHub CLI.'
+        # No Git credential helper or browser is needed in the live ISO.
+        GH_PROMPT_DISABLED=1 timeout --foreground --kill-after=5 600 "$gh_binary" auth login \
+            --hostname github.com --web --git-protocol https --insecure-storage --clipboard=false
+        "$gh_binary" auth token --hostname github.com >/dev/null 2>&1 || {
+            echo 'GitHub login did not save usable local credentials. Run the launcher again.' >&2
+            return 1
+        }
+        pending_auth_dir=''
+    fi
 
-    commit=$(timeout --kill-after=5 60 "$gh_binary" api "repos/$repository/commits/main" --jq .sha)
+    if ! commit=$(timeout --kill-after=5 60 "$gh_binary" api "repos/$repository/commits/main" --jq .sha); then
+        echo 'Could not fetch the installer revision. Your local login is saved; retry after resolving the reported error.' >&2
+        echo 'If GitHub reports an invalid login, run: bash /run/boot --logout' >&2
+        return 1
+    fi
     [[ $commit =~ ^[0-9a-f]{40}$ ]] || { echo 'GitHub returned an invalid commit ID.' >&2; return 1; }
     echo "Downloading the installer from $repository at commit $commit..."
     timeout --kill-after=5 180 "$gh_binary" api "repos/$repository/tarball/$commit" > "$download_dir/source.tar.gz"
 
-    # Only the source checkout remains for diagnostics and retrying later stages.
+    # Keep source checkouts and session credentials in RAM for retries.
     umask 022
     source_dir=$(mktemp -d /run/homelab.XXXXXX)
     tar -xzf "$download_dir/source.tar.gz" -C "$source_dir" --strip-components=1 --no-same-owner
